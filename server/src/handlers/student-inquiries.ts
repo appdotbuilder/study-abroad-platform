@@ -4,6 +4,9 @@ import {
   type UpdateStudentInquiryInput,
   type GetStudentInquiriesInput 
 } from '../schema';
+import { db } from '../db';
+import { studentInquiriesTable } from '../db/schema';
+import { eq, and, gte, lte, ilike, desc, count, type SQL } from 'drizzle-orm';
 
 export async function getStudentInquiries(input: GetStudentInquiriesInput): Promise<{
   data: StudentInquiry[];
@@ -11,14 +14,83 @@ export async function getStudentInquiries(input: GetStudentInquiriesInput): Prom
   page: number;
   limit: number;
 }> {
-  // This is a placeholder declaration! Real code should be implemented here.
-  // The goal of this handler is fetching student inquiries with pagination and filtering
-  return {
-    data: [],
-    total: 0,
-    page: input.page,
-    limit: input.limit,
-  };
+  try {
+    const offset = (input.page - 1) * input.limit;
+    
+    // Build conditions array for filtering
+    const conditions: SQL<unknown>[] = [];
+
+    if (input.status) {
+      conditions.push(eq(studentInquiriesTable.status, input.status));
+    }
+
+    if (input.language_code) {
+      conditions.push(eq(studentInquiriesTable.language_code, input.language_code));
+    }
+
+    if (input.date_from) {
+      conditions.push(gte(studentInquiriesTable.created_at, input.date_from));
+    }
+
+    if (input.date_to) {
+      conditions.push(lte(studentInquiriesTable.created_at, input.date_to));
+    }
+
+    if (input.search) {
+      const searchTerm = `%${input.search}%`;
+      conditions.push(
+        ilike(studentInquiriesTable.full_name, searchTerm)
+      );
+    }
+
+    // Execute queries based on whether we have conditions
+    let results: StudentInquiry[];
+    let totalResults: Array<{ count: number }>;
+
+    if (conditions.length > 0) {
+      const whereCondition = conditions.length === 1 ? conditions[0] : and(...conditions);
+      
+      // Execute main query with conditions
+      results = await db.select()
+        .from(studentInquiriesTable)
+        .where(whereCondition)
+        .orderBy(desc(studentInquiriesTable.created_at))
+        .limit(input.limit)
+        .offset(offset)
+        .execute();
+
+      // Execute count query with conditions
+      totalResults = await db.select({ count: count() })
+        .from(studentInquiriesTable)
+        .where(whereCondition)
+        .execute();
+    } else {
+      // Execute main query without conditions
+      results = await db.select()
+        .from(studentInquiriesTable)
+        .orderBy(desc(studentInquiriesTable.created_at))
+        .limit(input.limit)
+        .offset(offset)
+        .execute();
+
+      // Execute count query without conditions
+      totalResults = await db.select({ count: count() })
+        .from(studentInquiriesTable)
+        .execute();
+    }
+
+    const total = totalResults[0]?.count || 0;
+
+    return {
+      data: results,
+      total: Number(total),
+      page: input.page,
+      limit: input.limit,
+    };
+  } catch (error) {
+    console.error('Failed to fetch student inquiries:', error);
+    throw error;
+  }
 }
 
 export async function getStudentInquiryById(id: number): Promise<StudentInquiry | null> {

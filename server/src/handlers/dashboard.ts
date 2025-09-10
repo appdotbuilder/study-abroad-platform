@@ -1,21 +1,99 @@
+import { db } from '../db';
+import { 
+  countriesTable,
+  universitiesTable,
+  majorsTable,
+  articlesTable,
+  studentInquiriesTable
+} from '../db/schema';
 import { 
   type DashboardStats 
 } from '../schema';
+import { count, eq, gte, desc } from 'drizzle-orm';
 
 export async function getDashboardStats(): Promise<DashboardStats> {
-  // This is a placeholder declaration! Real code should be implemented here.
-  // The goal of this handler is fetching comprehensive dashboard statistics
-  return {
-    total_countries: 0,
-    total_universities: 0,
-    total_majors: 0,
-    total_articles: 0,
-    total_inquiries: 0,
-    new_inquiries_today: 0,
-    inquiries_by_status: {},
-    inquiries_by_language: {},
-    recent_inquiries: [],
-  };
+  try {
+    // Get today's date for filtering today's inquiries
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Get total counts for all main entities
+    const [
+      countriesCount,
+      universitiesCount,
+      majorsCount,
+      articlesCount,
+      inquiriesCount,
+      todayInquiriesCount
+    ] = await Promise.all([
+      // Total countries
+      db.select({ count: count() }).from(countriesTable).execute(),
+      // Total universities
+      db.select({ count: count() }).from(universitiesTable).execute(),
+      // Total majors
+      db.select({ count: count() }).from(majorsTable).execute(),
+      // Total articles
+      db.select({ count: count() }).from(articlesTable).execute(),
+      // Total inquiries
+      db.select({ count: count() }).from(studentInquiriesTable).execute(),
+      // Today's new inquiries
+      db.select({ count: count() })
+        .from(studentInquiriesTable)
+        .where(gte(studentInquiriesTable.created_at, today))
+        .execute()
+    ]);
+
+    // Get inquiries grouped by status
+    const inquiriesByStatusResults = await db.select({
+      status: studentInquiriesTable.status,
+      count: count()
+    })
+    .from(studentInquiriesTable)
+    .groupBy(studentInquiriesTable.status)
+    .execute();
+
+    // Get inquiries grouped by language
+    const inquiriesByLanguageResults = await db.select({
+      language: studentInquiriesTable.language_code,
+      count: count()
+    })
+    .from(studentInquiriesTable)
+    .groupBy(studentInquiriesTable.language_code)
+    .execute();
+
+    // Get recent inquiries (last 10)
+    const recentInquiriesResults = await db.select()
+      .from(studentInquiriesTable)
+      .orderBy(desc(studentInquiriesTable.created_at))
+      .limit(10)
+      .execute();
+
+    // Transform grouped results into records
+    const inquiries_by_status: Record<string, number> = {};
+    inquiriesByStatusResults.forEach(item => {
+      inquiries_by_status[item.status] = item.count;
+    });
+
+    const inquiries_by_language: Record<string, number> = {};
+    inquiriesByLanguageResults.forEach(item => {
+      inquiries_by_language[item.language] = item.count;
+    });
+
+    return {
+      total_countries: countriesCount[0].count,
+      total_universities: universitiesCount[0].count,
+      total_majors: majorsCount[0].count,
+      total_articles: articlesCount[0].count,
+      total_inquiries: inquiriesCount[0].count,
+      new_inquiries_today: todayInquiriesCount[0].count,
+      inquiries_by_status,
+      inquiries_by_language,
+      recent_inquiries: recentInquiriesResults
+    };
+  } catch (error) {
+    console.error('Dashboard stats fetch failed:', error);
+    throw error;
+  }
 }
 
 export async function getVisitorAnalytics(days: number = 30): Promise<{
